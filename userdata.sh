@@ -63,6 +63,8 @@ fi
 
 # Install Git inside Jenkins
 sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git"
+# Fix permissions for Jenkins Docker access
+sudo docker exec -u root jenkins bash -c "chmod 666 /var/run/docker.sock || true"
 
 # Symlink kubectl and minikube to /usr/bin inside container for PATH access
 sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/kubectl /usr/bin/kubectl"
@@ -97,3 +99,4 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   sudo reboot
 fi
+
