@@ -23,7 +23,25 @@ sudo systemctl start docker
 sudo usermod -aG docker ubuntu
 
 # -------------------------------
-# Run Jenkins in Docker (port 8080) with Docker + Minikube + kubectl access
+# Install Minikube + kubectl on host
+# -------------------------------
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+
+sudo snap install kubectl --classic
+
+# Start Minikube (Docker driver)
+newgrp docker <<EONG
+minikube start --driver=docker
+EONG
+
+# -------------------------------
+# Get docker group ID for Jenkins mapping
+# -------------------------------
+DOCKER_GID=$(getent group docker | cut -d: -f3)
+
+# -------------------------------
+# Run Jenkins in Docker (with Docker + Minikube + kubectl access)
 # -------------------------------
 if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
   sudo docker run -d --name jenkins --restart unless-stopped \
@@ -35,11 +53,28 @@ if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
     -v /usr/local/bin/minikube:/usr/local/bin/minikube \
     -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
     -v /home/ubuntu/.minikube:/var/jenkins_home/.minikube \
+    --group-add $DOCKER_GID \
     jenkins/jenkins:lts-jdk17
 fi
 
 # -------------------------------
-# Run SonarQube in Docker with volumes (port 9000)
+# Post-setup inside Jenkins container
+# -------------------------------
+
+# Install Git inside Jenkins
+sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git"
+
+# Symlink kubectl and minikube to /usr/bin inside container for PATH access
+sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/kubectl /usr/bin/kubectl"
+sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/minikube /usr/bin/minikube"
+
+# Verify Docker, kubectl, minikube are available inside Jenkins
+sudo docker exec jenkins which docker
+sudo docker exec jenkins which kubectl
+sudo docker exec jenkins which minikube
+
+# -------------------------------
+# Run SonarQube in Docker (port 9000)
 # -------------------------------
 sudo sysctl --system
 sudo docker volume create sonarqube_data
@@ -54,25 +89,6 @@ if [ ! "$(sudo docker ps -q -f name=sonarqube)" ]; then
     -v sonarqube_logs:/opt/sonarqube/logs \
     sonarqube:lts-community
 fi
-
-# -------------------------------
-# Install Minikube
-# -------------------------------
-curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-sudo install minikube-linux-amd64 /usr/local/bin/minikube
-
-# -------------------------------
-# Install kubectl (via snap, auto-updates)
-# -------------------------------
-sudo snap install kubectl --classic
-
-# -------------------------------
-# Start Minikube (Docker driver)
-# -------------------------------
-# Force Docker group immediately for ubuntu user
-newgrp docker <<EONG
-minikube start --driver=docker
-EONG
 
 # -------------------------------
 # Reboot if required
