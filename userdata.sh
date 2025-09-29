@@ -23,12 +23,14 @@ sudo systemctl start docker
 sudo usermod -aG docker ubuntu
 
 # -------------------------------
-# Run Jenkins in Docker (port 8080)
+# Run Jenkins in Docker (port 8080) with Docker access
 # -------------------------------
 if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
   sudo docker run -d --name jenkins --restart unless-stopped \
     -p 8080:8080 -p 50000:50000 \
     -v jenkins_home:/var/jenkins_home \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /usr/bin/docker:/usr/bin/docker \
     jenkins/jenkins:lts-jdk17
 fi
 
