@@ -23,7 +23,7 @@ sudo systemctl start docker
 sudo usermod -aG docker ubuntu
 
 # -------------------------------
-# Run Jenkins in Docker (port 8080) with Docker access
+# Run Jenkins in Docker (port 8080) with Docker + Minikube + kubectl access
 # -------------------------------
 if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
   sudo docker run -d --name jenkins --restart unless-stopped \
@@ -31,6 +31,10 @@ if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
     -v jenkins_home:/var/jenkins_home \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /usr/bin/docker:/usr/bin/docker \
+    -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
+    -v /usr/local/bin/minikube:/usr/local/bin/minikube \
+    -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
+    -v /home/ubuntu/.minikube:/var/jenkins_home/.minikube \
     jenkins/jenkins:lts-jdk17
 fi
 
