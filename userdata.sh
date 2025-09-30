@@ -55,7 +55,6 @@ if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
     -p 8080:8080 -p 50000:50000 \
     -v jenkins_home:/var/jenkins_home \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /usr/bin/docker:/usr/bin/docker \
     -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
     -v /usr/local/bin/minikube:/usr/local/bin/minikube \
     -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
@@ -68,8 +67,8 @@ fi
 # Post-setup inside Jenkins container
 # -------------------------------
 
-# Install Git inside Jenkins
-sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git"
+# Install Git + Docker CLI inside Jenkins
+sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git docker.io"
 
 # Symlink kubectl and minikube to /usr/bin inside container for PATH access
 sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/kubectl /usr/bin/kubectl"
@@ -77,6 +76,7 @@ sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/minikube /usr/bi
 
 # Verify Docker, kubectl, minikube are available inside Jenkins
 sudo docker exec jenkins which docker
+sudo docker exec jenkins docker --version
 sudo docker exec jenkins which kubectl
 sudo docker exec jenkins which minikube
 
