@@ -8,6 +8,13 @@ while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
    sleep 10
 done
 
+# -------------------------------
+# Add Kubernetes apt repo (fix for missing GPG key)
+# -------------------------------
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
 # Update system
 sudo apt-get update -y
 sudo apt-get upgrade -y
@@ -23,17 +30,58 @@ sudo systemctl start docker
 sudo usermod -aG docker ubuntu
 
 # -------------------------------
-# Run Jenkins in Docker (port 8080)
+# Install Minikube + kubectl on host
+# -------------------------------
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+
+sudo snap install kubectl --classic
+
+# Start Minikube (Docker driver)
+newgrp docker <<EONG
+minikube start --driver=docker
+EONG
+
+# -------------------------------
+# Get docker group ID for Jenkins mapping
+# -------------------------------
+DOCKER_GID=$(getent group docker | cut -d: -f3)
+
+# -------------------------------
+# Run Jenkins in Docker (with Docker + Minikube + kubectl access)
 # -------------------------------
 if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
   sudo docker run -d --name jenkins --restart unless-stopped \
     -p 8080:8080 -p 50000:50000 \
     -v jenkins_home:/var/jenkins_home \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /usr/bin/docker:/usr/bin/docker \
+    -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
+    -v /usr/local/bin/minikube:/usr/local/bin/minikube \
+    -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
+    -v /home/ubuntu/.minikube:/var/jenkins_home/.minikube \
+    --group-add $DOCKER_GID \
     jenkins/jenkins:lts-jdk17
 fi
 
 # -------------------------------
-# Run SonarQube in Docker with volumes (port 9000)
+# Post-setup inside Jenkins container
+# -------------------------------
+
+# Install Git inside Jenkins
+sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git"
+
+# Symlink kubectl and minikube to /usr/bin inside container for PATH access
+sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/kubectl /usr/bin/kubectl"
+sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/minikube /usr/bin/minikube"
+
+# Verify Docker, kubectl, minikube are available inside Jenkins
+sudo docker exec jenkins which docker
+sudo docker exec jenkins which kubectl
+sudo docker exec jenkins which minikube
+
+# -------------------------------
+# Run SonarQube in Docker (port 9000)
 # -------------------------------
 sudo sysctl --system
 sudo docker volume create sonarqube_data
@@ -48,25 +96,6 @@ if [ ! "$(sudo docker ps -q -f name=sonarqube)" ]; then
     -v sonarqube_logs:/opt/sonarqube/logs \
     sonarqube:lts-community
 fi
-
-# -------------------------------
-# Install Minikube
-# -------------------------------
-curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-sudo install minikube-linux-amd64 /usr/local/bin/minikube
-
-# -------------------------------
-# Install kubectl (via snap, auto-updates)
-# -------------------------------
-sudo snap install kubectl --classic
-
-# -------------------------------
-# Start Minikube (Docker driver)
-# -------------------------------
-# Force Docker group immediately for ubuntu user
-newgrp docker <<EONG
-minikube start --driver=docker
-EONG
 
 # -------------------------------
 # Reboot if required
