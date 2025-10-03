@@ -82,20 +82,18 @@ resource "aws_instance" "dev_server" {
   key_name      = var.key_name
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
 
+  # Bootstrap Jenkins + SonarQube + Minikube
   user_data = file("${path.module}/userdata.sh")
 
+  # Increase root volume size
   root_block_device {
-    volume_size = 50       # 👈 Increase root volume size (GB)
-    volume_type = "gp3"    # General Purpose SSD (recommended)
+    volume_size           = 50      # 50 GB disk
+    volume_type           = "gp3"   # General Purpose SSD
     delete_on_termination = true
-  
-  user_data = file("${path.module}/userdata.sh")
+  }
 
   tags = {
     Name        = "Dev-Server-Jenkins-SonarQube-Minikube"
     Environment = "Dev"
   }
 }
-
-
-
