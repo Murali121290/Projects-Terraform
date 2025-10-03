@@ -84,9 +84,18 @@ resource "aws_instance" "dev_server" {
 
   user_data = file("${path.module}/userdata.sh")
 
+  root_block_device {
+    volume_size = 50       # 👈 Increase root volume size (GB)
+    volume_type = "gp3"    # General Purpose SSD (recommended)
+    delete_on_termination = true
+  }
+
+  user_data = file("${path.module}/userdata.sh")
+
   tags = {
     Name        = "Dev-Server-Jenkins-SonarQube-Minikube"
     Environment = "Dev"
   }
 }
+
 
