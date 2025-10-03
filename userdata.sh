@@ -38,9 +38,7 @@ sudo install minikube-linux-amd64 /usr/local/bin/minikube
 sudo snap install kubectl --classic
 
 # Start Minikube (Docker driver)
-newgrp docker <<EONG
-minikube start --driver=docker
-EONG
+sudo -u ubuntu -i minikube start --driver=docker --force
 
 # -------------------------------
 # Get docker group ID for Jenkins mapping
@@ -122,4 +120,5 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   sudo reboot
 fi
+
 
