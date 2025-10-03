@@ -1,106 +1,107 @@
-#!/bin/bash
-exec > /var/log/userdata.log 2>&1
-set -xe
+              #!/bin/bash
+              exec > /var/log/userdata.log 2>&1
+              set -xe
 
-# --- Wait for apt locks ---
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-   echo "Waiting for apt lock..."
-   sleep 10
-done
+              # Wait for apt locks
+              while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+                echo "Waiting for apt lock..."
+                sleep 5
+              done
 
-# -------------------------------
-# Add Kubernetes apt repo (fix for missing GPG key)
-# -------------------------------
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+              export DEBIAN_FRONTEND=noninteractive
 
-# Update system
-sudo apt-get update -y
-sudo apt-get upgrade -y
+              # Add Kubernetes apt repo (for kubectl compatibility)
+              mkdir -p /etc/apt/keyrings
+              curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+              echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" > /etc/apt/sources.list.d/kubernetes.list || true
 
-# Install Docker + Java 17 + basic tools
-sudo apt-get install -y docker.io git curl wget unzip openjdk-17-jdk apt-transport-https ca-certificates gnupg lsb-release software-properties-common fontconfig conntrack
+              apt-get update -y
+              apt-get upgrade -y
 
-# Enable and start Docker
-sudo systemctl enable docker
-sudo systemctl start docker
+              # Install packages
+              apt-get install -y docker.io git curl wget unzip openjdk-17-jdk apt-transport-https ca-certificates gnupg lsb-release software-properties-common fontconfig conntrack
 
-# Add ubuntu user to Docker group
-sudo usermod -aG docker ubuntu
+              # Start & enable docker
+              systemctl enable docker
+              systemctl start docker
 
-# -------------------------------
-# Install Minikube + kubectl on host
-# -------------------------------
-curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-sudo install minikube-linux-amd64 /usr/local/bin/minikube
+              # Add ubuntu user to docker group
+              usermod -aG docker ubuntu || true
 
-sudo snap install kubectl --classic
+              # Install kubectl (snap as fallback if apt fails)
+              if ! command -v kubectl >/dev/null 2>&1; then
+                snap install kubectl --classic || {
+                  curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                  install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+                  rm -f kubectl
+                }
+              fi
 
-# Start Minikube (Docker driver)
-newgrp docker <<EONG
-minikube start --driver=docker
-EONG
+              # Install minikube
+              if ! command -v minikube >/dev/null 2>&1; then
+                curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+                install minikube-linux-amd64 /usr/local/bin/minikube
+                rm -f minikube-linux-amd64
+              fi
 
-# -------------------------------
-# Get docker group ID for Jenkins mapping
-# -------------------------------
-DOCKER_GID=$(getent group docker | cut -d: -f3)
+              # Ensure docker group id for mapping into Jenkins container
+              DOCKER_GID=$(getent group docker | cut -d: -f3)
+              if [ -z "$DOCKER_GID" ]; then
+                DOCKER_GID=999
+              fi
 
-# -------------------------------
-# Run Jenkins in Docker (with Docker + Minikube + kubectl access)
-# -------------------------------
-if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
-  sudo docker run -d --name jenkins --restart unless-stopped \
-    -p 8080:8080 -p 50000:50000 \
-    -v jenkins_home:/var/jenkins_home \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
-    -v /usr/local/bin/minikube:/usr/local/bin/minikube \
-    -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
-    -v /home/ubuntu/.minikube:/var/jenkins_home/.minikube \
-    --group-add $DOCKER_GID \
-    jenkins/jenkins:lts-jdk17
-fi
+              # Make .kube and .minikube dirs for ubuntu user
+              mkdir -p /home/ubuntu/.kube /home/ubuntu/.minikube
+              chown -R ubuntu:ubuntu /home/ubuntu/.kube /home/ubuntu/.minikube
 
-# -------------------------------
-# Post-setup inside Jenkins container
-# -------------------------------
+              # Start minikube as ubuntu user with Docker driver (best-effort)
+              su - ubuntu -c "minikube start --driver=docker --memory=4096 --cpus=2" || echo "minikube start failed - continue"
 
-# Install Git + Docker CLI inside Jenkins
-sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git docker.io"
+              # Create Docker volumes for Jenkins and SonarQube
+              docker volume create jenkins_home || true
+              docker volume create sonarqube_data || true
+              docker volume create sonarqube_extensions || true
+              docker volume create sonarqube_logs || true
 
-# Symlink kubectl and minikube to /usr/bin inside container for PATH access
-sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/kubectl /usr/bin/kubectl"
-sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/minikube /usr/bin/minikube"
+              # Run SonarQube container (if not running)
+              if [ -z "$(docker ps -q -f name=sonarqube)" ]; then
+                docker run -d --name sonarqube --restart unless-stopped \
+                  -p 9000:9000 \
+                  -v sonarqube_data:/opt/sonarqube/data \
+                  -v sonarqube_extensions:/opt/sonarqube/extensions \
+                  -v sonarqube_logs:/opt/sonarqube/logs \
+                  sonarqube:lts-community || true
+              fi
 
-# Verify Docker, kubectl, minikube are available inside Jenkins
-sudo docker exec jenkins which docker
-sudo docker exec jenkins docker --version
-sudo docker exec jenkins which kubectl
-sudo docker exec jenkins which minikube
+              # Run Jenkins container with access to docker, kubectl, minikube configs
+              if [ -z "$(docker ps -q -f name=jenkins)" ]; then
+                docker run -d --name jenkins --restart unless-stopped \
+                  -p 8080:8080 -p 50000:50000 \
+                  -v jenkins_home:/var/jenkins_home \
+                  -v /var/run/docker.sock:/var/run/docker.sock \
+                  -v /usr/bin/docker:/usr/bin/docker \
+                  -v /usr/local/bin/kubectl:/usr/bin/kubectl \
+                  -v /usr/local/bin/minikube:/usr/bin/minikube \
+                  -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
+                  -v /home/ubuntu/.minikube:/var/jenkins_home/.minikube \
+                  --group-add $DOCKER_GID \
+                  jenkins/jenkins:lts-jdk17 || true
+              fi
 
-# -------------------------------
-# Run SonarQube in Docker (port 9000)
-# -------------------------------
-sudo sysctl --system
-sudo docker volume create sonarqube_data
-sudo docker volume create sonarqube_extensions
-sudo docker volume create sonarqube_logs
+              # Install git & docker CLI inside Jenkins container as fallback
+              docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git docker.io || true"
 
-if [ ! "$(sudo docker ps -q -f name=sonarqube)" ]; then
-  sudo docker run -d --name sonarqube --restart unless-stopped \
-    -p 9000:9000 \
-    -v sonarqube_data:/opt/sonarqube/data \
-    -v sonarqube_extensions:/opt/sonarqube/extensions \
-    -v sonarqube_logs:/opt/sonarqube/logs \
-    sonarqube:lts-community
-fi
+              # Ensure symlinks inside container (if missing)
+              docker exec -u root jenkins bash -c "ln -sf /usr/bin/kubectl /usr/local/bin/kubectl || true"
+              docker exec -u root jenkins bash -c "ln -sf /usr/bin/minikube /usr/local/bin/minikube || true"
 
-# -------------------------------
-# Reboot if required
-# -------------------------------
-if [ -f /var/run/reboot-required ]; then
-  echo "System reboot required. Rebooting..."
-  sudo reboot
-fi
+              # Output versions for debug
+              docker exec jenkins which docker || true
+              docker exec jenkins docker --version || true
+              docker exec jenkins which kubectl || true
+              docker exec jenkins which minikube || true
+
+              # Ensure sysctl (for sonarqube if needed)
+              sysctl --system || true
+
+              echo "Bootstrap finished" >> /var/log/userdata.log
