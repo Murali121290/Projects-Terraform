@@ -55,7 +55,7 @@ if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
     -p 8080:8080 -p 50000:50000 \
     -v jenkins_home:/var/jenkins_home \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /usr/bin/docker:/usr/bin/docker \              # 👈 Mount Docker CLI
+    -v /usr/bin/docker:/usr/bin/docker \
     -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
     -v /usr/local/bin/minikube:/usr/local/bin/minikube \
     -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
@@ -122,3 +122,4 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   sudo reboot
 fi
+
