@@ -9,13 +9,8 @@ while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
 done
 
 # -------------------------------
-# Add Kubernetes apt repo (fix for missing GPG key)
-# -------------------------------
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
-
 # Update system
+# -------------------------------
 sudo apt-get update -y
 sudo apt-get upgrade -y
 
@@ -30,15 +25,22 @@ sudo systemctl start docker
 sudo usermod -aG docker ubuntu
 
 # -------------------------------
-# Install Minikube + kubectl on host
+# Install kubectl
 # -------------------------------
-curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-sudo install minikube-linux-amd64 /usr/local/bin/minikube
-
 sudo snap install kubectl --classic
 
-# Start Minikube (Docker driver)
-sudo -u ubuntu -i minikube start --driver=docker --force
+# -------------------------------
+# Install k3s (server mode)
+# -------------------------------
+curl -sfL https://get.k3s.io | sh -
+
+# Wait until k3s is up
+sleep 30
+
+# Setup kubeconfig for ubuntu user
+mkdir -p /home/ubuntu/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config
+sudo chown ubuntu:ubuntu /home/ubuntu/.kube/config
 
 # -------------------------------
 # Get docker group ID for Jenkins mapping
@@ -46,7 +48,7 @@ sudo -u ubuntu -i minikube start --driver=docker --force
 DOCKER_GID=$(getent group docker | cut -d: -f3)
 
 # -------------------------------
-# Run Jenkins in Docker (with Docker + Minikube + kubectl access)
+# Run Jenkins in Docker (with Docker + kubectl + k3s access)
 # -------------------------------
 if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
   sudo docker run -d --name jenkins --restart unless-stopped \
@@ -55,9 +57,7 @@ if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /usr/bin/docker:/usr/bin/docker \
     -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
-    -v /usr/local/bin/minikube:/usr/local/bin/minikube \
     -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
-    -v /home/ubuntu/.minikube:/var/jenkins_home/.minikube \
     --group-add $DOCKER_GID \
     jenkins/jenkins:lts-jdk17
 fi
@@ -65,35 +65,26 @@ fi
 # -------------------------------
 # Post-setup inside Jenkins container
 # -------------------------------
-
-# Install Git (no need for docker.io inside Jenkins)
 sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git"
-
-# Symlink kubectl and minikube to /usr/bin inside container for PATH access
 sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/kubectl /usr/bin/kubectl"
-sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/minikube /usr/bin/minikube"
 
-# Verify Docker, kubectl, minikube are available inside Jenkins
+# Verify tools inside Jenkins
 sudo docker exec jenkins which docker
 sudo docker exec jenkins docker --version
 sudo docker exec jenkins which kubectl
-sudo docker exec jenkins which minikube
+sudo docker exec jenkins kubectl get nodes || true
 
 # -------------------------------
 # Install Jenkins plugins automatically
 # -------------------------------
 JENKINS_PLUGINS="git workflow-aggregator docker-plugin docker-workflow blueocean sonar github"
 
-# Install plugins inside Jenkins
 for plugin in $JENKINS_PLUGINS; do
   sudo docker exec -u root jenkins bash -c \
     "curl -L -o /var/jenkins_home/plugins/${plugin}.hpi https://updates.jenkins.io/latest/${plugin}.hpi"
 done
 
-# Set correct ownership
 sudo docker exec -u root jenkins bash -c "chown -R jenkins:jenkins /var/jenkins_home/plugins"
-
-# Restart Jenkins so plugins load
 sudo docker restart jenkins
 
 # -------------------------------
@@ -120,5 +111,3 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   sudo reboot
 fi
-
-
