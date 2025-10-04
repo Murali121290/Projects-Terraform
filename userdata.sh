@@ -25,9 +25,11 @@ sudo systemctl start docker
 sudo usermod -aG docker ubuntu
 
 # -------------------------------
-# Install kubectl
+# Install kubectl (latest stable)
 # -------------------------------
-sudo snap install kubectl --classic
+curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+rm kubectl
 
 # -------------------------------
 # Install k3s (server mode)
@@ -37,18 +39,14 @@ curl -sfL https://get.k3s.io | sh -
 # Wait until k3s is up
 sleep 30
 
-# Setup kubeconfig for ubuntu user
+# Setup kubeconfig for ubuntu user (replace 127.0.0.1 with EC2 IP)
+EC2_IP=$(hostname -I | awk '{print $1}')
 mkdir -p /home/ubuntu/.kube
-sudo cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config
-sudo chown ubuntu:ubuntu /home/ubuntu/.kube/config
+sudo sed "s/127.0.0.1/$EC2_IP/" /etc/rancher/k3s/k3s.yaml | sudo tee /home/ubuntu/.kube/config
+sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
 
 # -------------------------------
-# Get docker group ID for Jenkins mapping
-# -------------------------------
-DOCKER_GID=$(getent group docker | cut -d: -f3)
-
-# -------------------------------
-# Run Jenkins in Docker (with Docker + kubectl + k3s access)
+# Run Jenkins in Docker
 # -------------------------------
 if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
   sudo docker run -d --name jenkins --restart unless-stopped \
@@ -58,23 +56,19 @@ if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
     -v /usr/bin/docker:/usr/bin/docker \
     -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
     -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
-    --group-add $DOCKER_GID \
     jenkins/jenkins:lts-jdk17
 fi
 
 # -------------------------------
 # Post-setup inside Jenkins container
 # -------------------------------
-sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git"
+sudo docker exec -u root jenkins bash -c "apt-get update && apt-get install -y git curl"
 sudo docker exec -u root jenkins bash -c "ln -sf /usr/local/bin/kubectl /usr/bin/kubectl"
 
 # Verify tools inside Jenkins
-sudo docker exec jenkins which docker
 sudo docker exec jenkins docker --version
-sudo docker exec jenkins which kubectl
+sudo docker exec jenkins kubectl version --client || true
 sudo docker exec jenkins kubectl get nodes || true
-
-sudo docker restart jenkins
 
 # -------------------------------
 # Run SonarQube in Docker (port 9000)
@@ -100,4 +94,3 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   sudo reboot
 fi
-
