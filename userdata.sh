@@ -74,17 +74,6 @@ sudo docker exec jenkins docker --version
 sudo docker exec jenkins which kubectl
 sudo docker exec jenkins kubectl get nodes || true
 
-# -------------------------------
-# Install Jenkins plugins automatically
-# -------------------------------
-JENKINS_PLUGINS="git workflow-aggregator docker-plugin docker-workflow blueocean sonar github"
-
-for plugin in $JENKINS_PLUGINS; do
-  sudo docker exec -u root jenkins bash -c \
-    "curl -L -o /var/jenkins_home/plugins/${plugin}.hpi https://updates.jenkins.io/latest/${plugin}.hpi"
-done
-
-sudo docker exec -u root jenkins bash -c "chown -R jenkins:jenkins /var/jenkins_home/plugins"
 sudo docker restart jenkins
 
 # -------------------------------
@@ -111,3 +100,4 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   sudo reboot
 fi
+
