@@ -25,13 +25,6 @@ sudo systemctl start docker
 sudo usermod -aG docker ubuntu
 
 # -------------------------------
-# Install kubectl (latest stable)
-# -------------------------------
-curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-rm kubectl
-
-# -------------------------------
 # Install k3s (server mode)
 # -------------------------------
 curl -sfL https://get.k3s.io | sh -
@@ -94,3 +87,4 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   sudo reboot
 fi
+
