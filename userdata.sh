@@ -42,14 +42,16 @@ sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
 # Run Jenkins in Docker
 # -------------------------------
 if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
-  sudo docker run -d --name jenkins --restart unless-stopped \
-    -p 8080:8080 -p 50000:50000 \
-    -v jenkins_home:/var/jenkins_home \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /usr/bin/docker:/usr/bin/docker \
-    -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
-    -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
-    jenkins/jenkins:lts-jdk17
+sudo docker run -d --name jenkins --restart unless-stopped \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /usr/bin/docker:/usr/bin/docker \
+  -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
+  -v /usr/local/bin/k3s:/usr/local/bin/k3s \
+  -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
+  jenkins/jenkins:lts-jdk17
+
 fi
 
 # -------------------------------
@@ -87,4 +89,5 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   sudo reboot
 fi
+
 
