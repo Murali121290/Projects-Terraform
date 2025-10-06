@@ -58,13 +58,6 @@ sudo docker run -d --name jenkins --restart unless-stopped \
   -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
   jenkins/jenkins:lts-jdk17
 
-# Wait for Jenkins to initialize
-echo "Waiting for Jenkins to start..."
-until curl -s http://localhost:8080/login > /dev/null; do
-  sleep 10
-  echo "Still waiting for Jenkins..."
-done
-echo "Jenkins is up!"
 
 # Fix Docker & containerd permissions
 sudo chmod 666 /var/run/docker.sock || true
@@ -88,20 +81,6 @@ sudo docker run -d --name sonarqube --restart unless-stopped \
   -v sonarqube_logs:/opt/sonarqube/logs \
   sonarqube:lts-community
 
-# Wait for SonarQube startup
-echo "Waiting for SonarQube to start..."
-until curl -s http://localhost:9000 > /dev/null; do
-  sleep 15
-  echo "Still waiting for SonarQube..."
-done
-echo "SonarQube is up!"
-
-# -------------------------------
-# (Optional) Configure Jenkins SonarQube Integration
-# -------------------------------
-SONARQUBE_URL="http://sonarqube:9000"
-JENKINS_URL="http://localhost:8080"
-# Note: SonarQube token setup and Jenkins plugin install can be automated later using Jenkins CLI or Groovy scripts.
 
 # -------------------------------
 # Verify Everything
@@ -120,4 +99,5 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   reboot
 fi
+
 
