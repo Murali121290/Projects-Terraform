@@ -2,7 +2,9 @@
 exec > /var/log/userdata.log 2>&1
 set -xe
 
-# --- Wait for apt locks ---
+# -------------------------------
+# Wait for apt locks
+# -------------------------------
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
    echo "Waiting for apt lock..."
    sleep 10
@@ -15,11 +17,21 @@ sudo apt-get update -y
 sudo apt-get upgrade -y
 sudo apt-get install -y docker.io git curl wget unzip openjdk-17-jdk \
     apt-transport-https ca-certificates gnupg lsb-release \
-    software-properties-common fontconfig conntrack
+    software-properties-common fontconfig conntrack jq
 
-# Enable Docker
+# -------------------------------
+# Docker Setup & Performance Tuning
+# -------------------------------
+cat <<EOF | sudo tee /etc/docker/daemon.json
+{
+  "storage-driver": "overlay2",
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "50m", "max-file": "3" }
+}
+EOF
+
 sudo systemctl enable docker
-sudo systemctl start docker
+sudo systemctl restart docker
 sudo usermod -aG docker ubuntu
 
 # -------------------------------
@@ -30,16 +42,18 @@ sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 sudo rm kubectl
 
 # -------------------------------
-# Install K3s (single-node)
+# Install K3s (Single-node cluster)
 # -------------------------------
 sudo curl -sfL https://get.k3s.io | sh -
 sleep 30
 
-# Setup kubeconfig for ubuntu user
+# Configure kubeconfig for Ubuntu user
 EC2_IP=$(hostname -I | awk '{print $1}')
-mkdir -p /home/ubuntu/.kube
-sudo sed "s/127.0.0.1/$EC2_IP/" /etc/rancher/k3s/k3s.yaml > /home/ubuntu/.kube/config
+sudo mkdir -p /home/ubuntu/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config
+sudo sed -i "s/127.0.0.1/$EC2_IP/" /home/ubuntu/.kube/config
 sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
+sudo chmod 600 /home/ubuntu/.kube/config
 
 # -------------------------------
 # Run Jenkins container
@@ -51,36 +65,63 @@ sudo docker run -d --name jenkins --restart unless-stopped \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /usr/bin/docker:/usr/bin/docker \
   -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
-  -v /usr/local/bin/ctr:/usr/local/bin/ctr \
-  -v /run/k3s/containerd:/run/k3s/containerd \
   -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
   jenkins/jenkins:lts-jdk17
 
 # Wait for Jenkins to initialize
-sleep 30
+echo "Waiting for Jenkins to start..."
+until curl -s http://localhost:8080/login > /dev/null; do
+  sleep 10
+  echo "Still waiting for Jenkins..."
+done
+echo "Jenkins is up!"
 
-# Fix Docker socket + containerd permissions
+# Fix Docker & containerd permissions
 sudo chmod 666 /var/run/docker.sock || true
 sudo chmod 666 /run/k3s/containerd/containerd.sock || true
 
-# Add Jenkins user to Docker group (inside container)
-
+# Add Jenkins user to Docker group
 sudo docker exec -u root jenkins bash -c "groupadd -f docker && usermod -aG docker jenkins"
 sudo docker restart jenkins
 
 # -------------------------------
 # Run SonarQube (port 9000)
 # -------------------------------
-
 sudo docker volume create sonarqube_data
 sudo docker volume create sonarqube_extensions
 sudo docker volume create sonarqube_logs
-docker run -d --name sonarqube --restart unless-stopped \
+
+sudo docker run -d --name sonarqube --restart unless-stopped \
   -p 9000:9000 \
   -v sonarqube_data:/opt/sonarqube/data \
   -v sonarqube_extensions:/opt/sonarqube/extensions \
   -v sonarqube_logs:/opt/sonarqube/logs \
   sonarqube:lts-community
+
+# Wait for SonarQube startup
+echo "Waiting for SonarQube to start..."
+until curl -s http://localhost:9000 > /dev/null; do
+  sleep 15
+  echo "Still waiting for SonarQube..."
+done
+echo "SonarQube is up!"
+
+# -------------------------------
+# (Optional) Configure Jenkins SonarQube Integration
+# -------------------------------
+SONARQUBE_URL="http://sonarqube:9000"
+JENKINS_URL="http://localhost:8080"
+# Note: SonarQube token setup and Jenkins plugin install can be automated later using Jenkins CLI or Groovy scripts.
+
+# -------------------------------
+# Verify Everything
+# -------------------------------
+echo "===== Installed Versions ====="
+docker --version
+kubectl version --client
+k3s --version
+java -version || true
+echo "================================"
 
 # -------------------------------
 # Optional Reboot
@@ -89,5 +130,3 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   reboot
 fi
-
-
