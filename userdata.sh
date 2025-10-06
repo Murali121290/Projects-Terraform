@@ -22,13 +22,6 @@ sudo apt-get install -y docker.io git curl wget unzip openjdk-17-jdk \
 # -------------------------------
 # Docker Setup & Performance Tuning
 # -------------------------------
-cat <<EOF | sudo tee /etc/docker/daemon.json
-{
-  "storage-driver": "overlay2",
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "50m", "max-file": "3" }
-}
-EOF
 
 sudo systemctl enable docker
 sudo systemctl restart docker
@@ -37,9 +30,6 @@ sudo usermod -aG docker ubuntu
 # -------------------------------
 # Install kubectl
 # -------------------------------
-sudo curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-sudo rm kubectl
 
 # -------------------------------
 # Install K3s (Single-node cluster)
@@ -130,3 +120,4 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   reboot
 fi
+
