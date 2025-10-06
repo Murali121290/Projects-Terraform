@@ -25,21 +25,21 @@ sudo usermod -aG docker ubuntu
 # -------------------------------
 # Install kubectl
 # -------------------------------
-curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-rm kubectl
+sudo curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+sudo rm kubectl
 
 # -------------------------------
 # Install K3s (single-node)
 # -------------------------------
-curl -sfL https://get.k3s.io | sh -
+sudo curl -sfL https://get.k3s.io | sh -
 sleep 30
 
 # Setup kubeconfig for ubuntu user
 EC2_IP=$(hostname -I | awk '{print $1}')
 mkdir -p /home/ubuntu/.kube
-sed "s/127.0.0.1/$EC2_IP/" /etc/rancher/k3s/k3s.yaml > /home/ubuntu/.kube/config
-chown -R ubuntu:ubuntu /home/ubuntu/.kube
+sudo sed "s/127.0.0.1/$EC2_IP/" /etc/rancher/k3s/k3s.yaml > /home/ubuntu/.kube/config
+sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
 
 # -------------------------------
 # Run Jenkins container
@@ -89,4 +89,5 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   reboot
 fi
+
 
