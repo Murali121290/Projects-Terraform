@@ -103,9 +103,19 @@ fi
 # Fix Jenkins permissions after boot
 # -------------------------------
 sleep 20
-sudo docker exec -u root jenkins bash -c "usermod -aG docker jenkins && usermod -aG containerd jenkins || true"
+sudo docker exec -u root jenkins bash -c "groupadd -f docker && usermod -aG docker jenkins"
+sudo docker exec -u root jenkins bash -c "usermod -aG containerd jenkins || true"
 sudo docker run --rm -v jenkins_home:/var/jenkins_home alpine sh -c "chown -R 1000:1000 /var/jenkins_home" || true
+
+# Apply all runtime permission fixes
+sudo chmod 666 /var/run/docker.sock
+sudo chmod 666 /run/k3s/containerd/containerd.sock
+
+# Restart Jenkins to apply group changes
 sudo docker restart jenkins
+
+# Optional: verify containerd connectivity (debug only)
+sudo docker exec -it jenkins ctr --address /run/k3s/containerd/containerd.sock version || true
 
 # -------------------------------
 # Wait for SonarQube to become ready
