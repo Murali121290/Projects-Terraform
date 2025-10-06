@@ -63,7 +63,7 @@ resource "aws_security_group" "ec2_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Flask
+  # k3s
   ingress {
     from_port   = 6443
     to_port     = 6443
@@ -101,8 +101,9 @@ resource "aws_instance" "dev_server" {
   }
 
   tags = {
-    Name        = "Dev-Server-Jenkins-SonarQube-Minikube"
+    Name        = "Dev-Server-Jenkins-SonarQube-K3s"
     Environment = "Dev"
   }
 }
+
 
