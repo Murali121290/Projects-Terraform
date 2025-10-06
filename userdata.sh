@@ -11,16 +11,16 @@ done
 # -------------------------------
 # System Update & Dependencies
 # -------------------------------
-apt-get update -y
-apt-get upgrade -y
-apt-get install -y docker.io git curl wget unzip openjdk-17-jdk \
+sudo apt-get update -y
+sudo apt-get upgrade -y
+sudo apt-get install -y docker.io git curl wget unzip openjdk-17-jdk \
     apt-transport-https ca-certificates gnupg lsb-release \
     software-properties-common fontconfig conntrack
 
 # Enable Docker
-systemctl enable docker
-systemctl start docker
-usermod -aG docker ubuntu
+sudo systemctl enable docker
+sudo systemctl start docker
+sudo usermod -aG docker ubuntu
 
 # -------------------------------
 # Install kubectl
@@ -44,7 +44,7 @@ chown -R ubuntu:ubuntu /home/ubuntu/.kube
 # -------------------------------
 # Run Jenkins container
 # -------------------------------
-docker run -d --name jenkins --restart unless-stopped \
+sudo docker run -d --name jenkins --restart unless-stopped \
   -u root \
   -p 8080:8080 -p 50000:50000 \
   -v jenkins_home:/var/jenkins_home \
@@ -60,20 +60,21 @@ docker run -d --name jenkins --restart unless-stopped \
 sleep 30
 
 # Fix Docker socket + containerd permissions
-chmod 666 /var/run/docker.sock || true
-chmod 666 /run/k3s/containerd/containerd.sock || true
+sudo chmod 666 /var/run/docker.sock || true
+sudo chmod 666 /run/k3s/containerd/containerd.sock || true
 
 # Add Jenkins user to Docker group (inside container)
-docker exec -u root jenkins bash -c "groupadd -f docker && usermod -aG docker jenkins"
-docker restart jenkins
+
+sudo docker exec -u root jenkins bash -c "groupadd -f docker && usermod -aG docker jenkins"
+sudo docker restart jenkins
 
 # -------------------------------
 # Run SonarQube (port 9000)
 # -------------------------------
-docker volume create sonarqube_data
-docker volume create sonarqube_extensions
-docker volume create sonarqube_logs
 
+sudo docker volume create sonarqube_data
+sudo docker volume create sonarqube_extensions
+sudo docker volume create sonarqube_logs
 docker run -d --name sonarqube --restart unless-stopped \
   -p 9000:9000 \
   -v sonarqube_data:/opt/sonarqube/data \
@@ -88,3 +89,4 @@ if [ -f /var/run/reboot-required ]; then
   echo "System reboot required. Rebooting..."
   reboot
 fi
+
