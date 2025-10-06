@@ -2,6 +2,8 @@
 exec > /var/log/userdata.log 2>&1
 set -xe
 
+echo "[INFO] ======== Starting EC2 Bootstrap ========="
+
 # --- Wait for apt locks ---
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
    echo "Waiting for apt lock..."
@@ -9,31 +11,24 @@ while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
 done
 
 # -------------------------------
-# System Update
+# System Update & Tools
 # -------------------------------
 sudo apt-get update -y
 sudo apt-get upgrade -y
-
-# -------------------------------
-# Install Dependencies
-# -------------------------------
 sudo apt-get install -y \
     docker.io git curl wget unzip openjdk-17-jdk apt-transport-https \
-    ca-certificates gnupg lsb-release software-properties-common fontconfig conntrack
+    ca-certificates gnupg lsb-release software-properties-common fontconfig conntrack jq
 
-# Enable Docker
+# Enable Docker and add ubuntu user to group
 sudo systemctl enable docker
 sudo systemctl start docker
-
-# Add ubuntu user to docker group
 sudo usermod -aG docker ubuntu
+sudo chmod 666 /var/run/docker.sock
 
 # -------------------------------
-# Install K3s (single-node)
+# Install K3s (Single Node)
 # -------------------------------
-sudo curl -sfL https://get.k3s.io | sh -
-
-# Wait until K3s is ready
+curl -sfL https://get.k3s.io | sh -s - --disable traefik
 sleep 30
 
 # Configure kubeconfig for ubuntu
@@ -43,7 +38,14 @@ sudo sed "s/127.0.0.1/$EC2_IP/" /etc/rancher/k3s/k3s.yaml | sudo tee /home/ubunt
 sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
 
 # -------------------------------
-# Ensure ctr wrapper exists
+# Fix containerd socket permissions for Jenkins
+# -------------------------------
+sudo groupadd -f containerd
+sudo chown root:containerd /run/k3s/containerd/containerd.sock
+sudo chmod 660 /run/k3s/containerd/containerd.sock
+
+# -------------------------------
+# Ensure ctr wrapper exists (for Jenkins)
 # -------------------------------
 cat <<'EOF' | sudo tee /usr/local/bin/ctr
 #!/bin/bash
@@ -52,19 +54,34 @@ EOF
 sudo chmod +x /usr/local/bin/ctr
 
 # -------------------------------
-# Run Jenkins container
+# Install kubectl (CLI tool for Jenkins)
 # -------------------------------
-sudo docker run -d --name jenkins --restart unless-stopped \
-  -p 8080:8080 -p 50000:50000 \
-  -v jenkins_home:/var/jenkins_home \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /usr/local/bin/docker:/usr/local/bin/docker \
-  -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
-  -v /usr/local/bin/k3s:/usr/local/bin/k3s \
-  -v /usr/local/bin/ctr:/usr/local/bin/ctr \
-  -v /run/k3s/containerd:/run/k3s/containerd \
-  -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
-  jenkins/jenkins:lts-jdk17
+sudo snap install kubectl --classic || true
+
+# -------------------------------
+# Get group IDs for proper container mapping
+# -------------------------------
+DOCKER_GID=$(getent group docker | cut -d: -f3)
+CONTAINERD_GID=$(getent group containerd | cut -d: -f3)
+
+# -------------------------------
+# Run Jenkins container (with access to Docker & K3s)
+# -------------------------------
+if [ ! "$(sudo docker ps -q -f name=jenkins)" ]; then
+  sudo docker run -d --name jenkins --restart unless-stopped \
+    -p 8080:8080 -p 50000:50000 \
+    -v jenkins_home:/var/jenkins_home \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /usr/bin/docker:/usr/bin/docker \
+    -v /usr/local/bin/kubectl:/usr/local/bin/kubectl \
+    -v /usr/local/bin/k3s:/usr/local/bin/k3s \
+    -v /usr/local/bin/ctr:/usr/local/bin/ctr \
+    -v /run/k3s/containerd/containerd.sock:/run/k3s/containerd/containerd.sock \
+    -v /home/ubuntu/.kube:/var/jenkins_home/.kube \
+    --group-add $DOCKER_GID \
+    --group-add $CONTAINERD_GID \
+    jenkins/jenkins:lts-jdk17
+fi
 
 # -------------------------------
 # Run SonarQube container
@@ -73,27 +90,45 @@ sudo docker volume create sonarqube_data
 sudo docker volume create sonarqube_extensions
 sudo docker volume create sonarqube_logs
 
-sudo docker run -d --name sonarqube --restart unless-stopped \
-  -p 9000:9000 \
-  -v sonarqube_data:/opt/sonarqube/data \
-  -v sonarqube_extensions:/opt/sonarqube/extensions \
-  -v sonarqube_logs:/opt/sonarqube/logs \
-  sonarqube:lts-community
+if [ ! "$(sudo docker ps -q -f name=sonarqube)" ]; then
+  sudo docker run -d --name sonarqube --restart unless-stopped \
+    -p 9000:9000 \
+    -v sonarqube_data:/opt/sonarqube/data \
+    -v sonarqube_extensions:/opt/sonarqube/extensions \
+    -v sonarqube_logs:/opt/sonarqube/logs \
+    sonarqube:lts-community
+fi
 
 # -------------------------------
-# Fix Docker & Jenkins permissions
+# Fix Jenkins permissions after boot
 # -------------------------------
 sleep 20
-sudo chmod 666 /var/run/docker.sock
-sudo docker exec -u root jenkins bash -c "groupadd -f docker && usermod -aG docker jenkins || true"
+sudo docker exec -u root jenkins bash -c "usermod -aG docker jenkins && usermod -aG containerd jenkins || true"
 sudo docker run --rm -v jenkins_home:/var/jenkins_home alpine sh -c "chown -R 1000:1000 /var/jenkins_home" || true
 sudo docker restart jenkins
 
+# -------------------------------
+# Wait for SonarQube to become ready
+# -------------------------------
+echo "[INFO] Waiting for SonarQube..."
+until curl -s http://localhost:9000/api/system/status | grep -q '"status":"UP"'; do
+  sleep 10
+  echo "Waiting..."
+done
+echo "[INFO] SonarQube is UP!"
+
+# -------------------------------
+# Print Jenkins admin password
+# -------------------------------
+echo "[INFO] Jenkins admin password:"
+sudo docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword || true
 
 # -------------------------------
 # Reboot if required
 # -------------------------------
 if [ -f /var/run/reboot-required ]; then
-  echo "System reboot required. Rebooting..."
+  echo "[INFO] System reboot required. Rebooting..."
   sudo reboot
 fi
+
+echo "[INFO] ======== Bootstrap Completed Successfully ========="
